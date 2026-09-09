@@ -46,8 +46,11 @@
 #define PA_BUFF_SIZE (PA_SAMPLE_RATE << (NSTEPS + FIRST_STEP))
 #define PA_FRAMES_PER_BUFFER 4096
 
-#define OUTPUT_FONT 40
-#define OUTPUT_WINDOW_HEIGHT 70
+#define METRIC_FONT 34
+#define AXIS_FONT 11
+#define BEAT_DOT 2
+#define METRIC_GAP 34
+#define OUTPUT_WINDOW_HEIGHT 92
 
 #define POSITIVE_SPAN 10
 #define NEGATIVE_SPAN 25
@@ -220,6 +223,25 @@ void redraw_op(struct output_panel *op);
 void op_set_snapshot(struct output_panel *op, struct snapshot *snst);
 void op_set_border(struct output_panel *op, int i);
 void op_destroy(struct output_panel *op);
+
+/* draw.c */
+#define CARD_RADIUS 10
+#define CARD_PAD 12
+#define TG_FONT_LABEL 11
+
+enum { TG_TEXT_BODY, TG_TEXT_VALUE, TG_TEXT_LABEL };
+
+struct tg_rect { double x, y, width, height; };
+
+extern cairo_pattern_t *black,*white,*red,*green,*blue,*blueish,*yellow;
+extern cairo_pattern_t *window_bg,*card_bg,*card_border,*text_dim,*text_faint;
+extern cairo_pattern_t *grid_minor,*grid_major,*highlight,*trace_glow,*band,*band_line;
+
+void tg_rounded_rect(cairo_t *c, double x, double y, double w, double h, double r);
+struct tg_rect tg_draw_card(cairo_t *c, double w, double h, const char *title);
+double tg_text(cairo_t *c, double x, double y, int size, int style,
+	       cairo_pattern_t *color, const char *text, double *height);
+double tg_text_width(cairo_t *c, int size, int style, const char *text);
 
 /* style.c */
 void tg_style_init(void);

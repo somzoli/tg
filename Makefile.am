@@ -9,6 +9,7 @@ tg_timer_SOURCES = src/algo.c \
 		   src/audio.c \
 		   src/computer.c \
 		   src/config.c \
+		   src/draw.c \
 		   src/interface.c \
 		   src/output_panel.c \
 		   src/serializer.c \

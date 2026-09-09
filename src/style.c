@@ -22,12 +22,15 @@
 #include "tg.h"
 
 static const char tg_css[] =
-"@define-color tg_bg       #15171d;"
-"@define-color tg_panel    #1c1f27;"
-"@define-color tg_raised   #232733;"
-"@define-color tg_border   #2c313d;"
-"@define-color tg_fg       #e7eaf0;"
-"@define-color tg_dim      #99a2b3;"
+/* Kept in step with the cairo palette in draw.c, so the widgets and the
+   plots read as one surface. */
+"@define-color tg_bg       #0e1016;"
+"@define-color tg_panel    #151822;"
+"@define-color tg_raised   #1d2230;"
+"@define-color tg_border   #232a38;"
+"@define-color tg_fg       #e8ecf4;"
+"@define-color tg_dim      #9aa5b8;"
+"@define-color tg_faint    #6b768a;"
 "@define-color tg_accent   #4d8dff;"
 
 "window, .background {"
@@ -44,17 +47,18 @@ static const char tg_css[] =
 "	padding: 0 8px;"
 "}"
 "headerbar .title { font-weight: bold; }"
+"headerbar button.flat { padding: 6px 10px; }"
 "headerbar .subtitle { color: @tg_dim; font-size: 11px; }"
 
 /* The strip of measurement controls under the title bar */
 ".tg-toolbar {"
 "	background-color: @tg_panel;"
 "	border: 1px solid @tg_border;"
-"	border-radius: 12px;"
+"	border-radius: 10px;"
 "	padding: 10px 14px;"
 "}"
 ".tg-caption {"
-"	color: @tg_dim;"
+"	color: @tg_faint;"
 "	font-size: 11px;"
 "	font-weight: bold;"
 "}"
@@ -92,7 +96,8 @@ static const char tg_css[] =
 "button.flat:hover, button.titlebutton:hover { background-color: @tg_raised; }"
 
 /* Button groups keep square inner corners */
-".linked > button { border-radius: 0; }"
+".linked > button { border-radius: 0; background-color: @tg_panel; }"
+".linked > button:hover { background-color: @tg_raised; }"
 ".linked > button:first-child { border-radius: 8px 0 0 8px; }"
 ".linked > button:last-child { border-radius: 0 8px 8px 0; }"
 ".linked > button:only-child { border-radius: 8px; }"

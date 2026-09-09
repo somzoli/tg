@@ -18,36 +18,11 @@
 
 #include "tg.h"
 
-cairo_pattern_t *black,*white,*red,*green,*blue,*blueish,*yellow;
-/* Chart decorations, kept apart from the status colours above */
-cairo_pattern_t *grid_minor,*grid_major,*highlight;
-
-static void define_color(cairo_pattern_t **gc,double r,double g,double b)
+static void draw_graph(double a, double b, cairo_t *c, struct processing_buffers *p,
+			struct tg_rect r)
 {
-	*gc = cairo_pattern_create_rgb(r,g,b);
-}
-
-void initialize_palette()
-{
-	define_color(&black,.07,.08,.10);		// background
-	define_color(&white,.91,.93,.96);		// traces and labels
-	define_color(&red,.95,.35,.35);			// failure
-	define_color(&green,.24,.80,.45);		// success
-	define_color(&blue,.30,.55,1);			// rate line, pulse marker
-	define_color(&blueish,.11,.15,.26);		// tic/toc bands
-	define_color(&yellow,.98,.78,.28);		// stale data
-	define_color(&grid_minor,.15,.17,.21);		// minor grid lines
-	define_color(&grid_major,.27,.30,.37);		// labelled grid lines
-	define_color(&highlight,.30,.55,1);		// strip borders
-}
-
-static void draw_graph(double a, double b, cairo_t *c, struct processing_buffers *p, GtkWidget *da)
-{
-	GtkAllocation temp;
-	gtk_widget_get_allocation (da, &temp);
-	int width = temp.width;
-	int height = temp.height;
-
+	int width = r.width;
+	int height = r.height;
 	int n;
 
 	int first = 1;
@@ -65,22 +40,38 @@ static void draw_graph(double a, double b, cairo_t *c, struct processing_buffers
 		if(n < width) k = -k;
 
 		if(first) {
-			cairo_move_to(c,i+.5,height/2+k+.5);
+			cairo_move_to(c, r.x+i+.5, r.y+height/2+k+.5);
 			first = 0;
 		} else
-			cairo_line_to(c,i+.5,height/2+k+.5);
+			cairo_line_to(c, r.x+i+.5, r.y+height/2+k+.5);
 	}
 }
 
+/* Fill the shape left on the path by draw_graph, with a soft vertical fade. */
+static void fill_trace(cairo_t *c, struct tg_rect r, int old)
+{
+	cairo_pattern_t *grad = cairo_pattern_create_linear(0, r.y, 0, r.y + r.height);
+	if(old) {
+		cairo_pattern_add_color_stop_rgba(grad, 0, .984,.749,.141, .95);
+		cairo_pattern_add_color_stop_rgba(grad, 1, .984,.749,.141, .45);
+	} else {
+		cairo_pattern_add_color_stop_rgba(grad, 0, .910,.925,.957, .95);
+		cairo_pattern_add_color_stop_rgba(grad, 1, .604,.760,1.00, .55);
+	}
+	cairo_set_line_width(c, 1);
+	cairo_set_source(c, grad);
+	cairo_fill_preserve(c);
+	cairo_stroke(c);
+	cairo_pattern_destroy(grad);
+}
+
 #ifdef DEBUG
-static void draw_debug_graph(double a, double b, cairo_t *c, struct processing_buffers *p, GtkWidget *da)
+static void draw_debug_graph(double a, double b, cairo_t *c, struct processing_buffers *p, struct tg_rect r)
 {
 	if(!p->debug) return;
 
-	GtkAllocation temp;
-	gtk_widget_get_allocation (da, &temp);
-	int width = temp.width;
-	int height = temp.height;
+	int width = r.width;
+	int height = r.height;
 
 	int i;
 	float max = 0;
@@ -103,10 +94,10 @@ static void draw_debug_graph(double a, double b, cairo_t *c, struct processing_b
 			int k = round((0.1+p->debug[j]/max)*0.8*height);
 
 			if(first) {
-				cairo_move_to(c,i+.5,height-k-.5);
+				cairo_move_to(c,r.x+i+.5,r.y+height-k-.5);
 				first = 0;
 			} else
-				cairo_line_to(c,i+.5,height-k-.5);
+				cairo_line_to(c,r.x+i+.5,r.y+height-k-.5);
 		}
 	}
 }
@@ -117,193 +108,196 @@ static double amplitude_to_time(double lift_angle, double amp)
 	return asin(lift_angle / (2 * amp)) / M_PI;
 }
 
-static double draw_watch_icon(cairo_t *c, int signal, int happy, int light)
+/* Status badge: a watch outline, a signal-strength meter, and the mode. */
+static double draw_status(cairo_t *c, struct tg_rect r, int signal, int happy, int light)
 {
-	happy = !!happy;
-	cairo_set_line_width(c,3);
-	cairo_set_source(c,happy?green:red);
-	cairo_move_to(c, OUTPUT_WINDOW_HEIGHT * 0.5, OUTPUT_WINDOW_HEIGHT * 0.5);
-	cairo_line_to(c, OUTPUT_WINDOW_HEIGHT * 0.75, OUTPUT_WINDOW_HEIGHT * (0.75 - 0.5*happy));
-	cairo_move_to(c, OUTPUT_WINDOW_HEIGHT * 0.5, OUTPUT_WINDOW_HEIGHT * 0.5);
-	cairo_line_to(c, OUTPUT_WINDOW_HEIGHT * 0.35, OUTPUT_WINDOW_HEIGHT * (0.65 - 0.3*happy));
+	double cx = r.x + 17;
+	double cy = r.y + r.height/2 - 4;
+	double rad = 15;
+
+	cairo_set_line_width(c, 2);
+	cairo_set_source(c, happy ? green : red);
+	cairo_arc(c, cx, cy, rad, 0, 2*M_PI);
 	cairo_stroke(c);
-	cairo_arc(c, OUTPUT_WINDOW_HEIGHT * 0.5, OUTPUT_WINDOW_HEIGHT * 0.5, OUTPUT_WINDOW_HEIGHT * 0.4, 0, 2*M_PI);
+
+	/* hands */
+	cairo_set_line_width(c, 2);
+	cairo_move_to(c, cx, cy);
+	cairo_line_to(c, cx + rad*0.52, cy - rad*(happy ? 0.36 : 0.02));
+	cairo_move_to(c, cx, cy);
+	cairo_line_to(c, cx - rad*0.30, cy - rad*(happy ? 0.60 : 0.34));
 	cairo_stroke(c);
-	int l = OUTPUT_WINDOW_HEIGHT * 0.8 / (2*NSTEPS - 1);
+
+	/* signal strength, four rising bars */
+	double bx = cx + rad + 9;
 	int i;
-	cairo_set_line_width(c,1);
-	for(i = 0; i < signal; i++) {
-		cairo_move_to(c, OUTPUT_WINDOW_HEIGHT + 0.5*l, OUTPUT_WINDOW_HEIGHT * 0.9 - 2*i*l);
-		cairo_line_to(c, OUTPUT_WINDOW_HEIGHT + 1.5*l, OUTPUT_WINDOW_HEIGHT * 0.9 - 2*i*l);
-		cairo_line_to(c, OUTPUT_WINDOW_HEIGHT + 1.5*l, OUTPUT_WINDOW_HEIGHT * 0.9 - (2*i+1)*l);
-		cairo_line_to(c, OUTPUT_WINDOW_HEIGHT + 0.5*l, OUTPUT_WINDOW_HEIGHT * 0.9 - (2*i+1)*l);
-		cairo_line_to(c, OUTPUT_WINDOW_HEIGHT + 0.5*l, OUTPUT_WINDOW_HEIGHT * 0.9 - 2*i*l);
-		cairo_stroke_preserve(c);
+	for(i = 0; i < NSTEPS; i++) {
+		double bh = 5 + i*3.4;
+		double by = cy + 9 - bh;
+		tg_rounded_rect(c, bx + i*6, by, 4, bh, 1.5);
+		if(i < signal) cairo_set_source(c, happy ? green : yellow);
+		else cairo_set_source(c, grid_major);
 		cairo_fill(c);
 	}
-	if(light) {
-		int l = OUTPUT_WINDOW_HEIGHT * 0.15;
-		cairo_set_line_width(c,2);
-		cairo_move_to(c, OUTPUT_WINDOW_HEIGHT * 0.5 - 0.5*l, OUTPUT_WINDOW_HEIGHT * 0.2);
-		cairo_line_to(c, OUTPUT_WINDOW_HEIGHT * 0.5 - 0.5*l, OUTPUT_WINDOW_HEIGHT * 0.2 + l);
-		cairo_line_to(c, OUTPUT_WINDOW_HEIGHT * 0.5        , OUTPUT_WINDOW_HEIGHT * 0.2 + l);
-		cairo_move_to(c, OUTPUT_WINDOW_HEIGHT * 0.5 - 0.2*l, OUTPUT_WINDOW_HEIGHT * 0.2 + 1);
-		cairo_line_to(c, OUTPUT_WINDOW_HEIGHT * 0.5 + 0.8*l, OUTPUT_WINDOW_HEIGHT * 0.2 + 1);
-		cairo_move_to(c, OUTPUT_WINDOW_HEIGHT * 0.5 + 0.3*l, OUTPUT_WINDOW_HEIGHT * 0.2 + 1);
-		cairo_line_to(c, OUTPUT_WINDOW_HEIGHT * 0.5 + 0.3*l, OUTPUT_WINDOW_HEIGHT * 0.2 + l + 1);
-		cairo_stroke(c);
-	}
-	return OUTPUT_WINDOW_HEIGHT + 3*l;
+
+	if(light)
+		tg_text(c, r.x + 2, r.y + r.height - TG_FONT_LABEL - 2,
+			TG_FONT_LABEL, TG_TEXT_LABEL, text_faint, "LIGHT", NULL);
+
+	return bx + NSTEPS*6 + 10;
 }
 
-static void cairo_init(cairo_t *c)
+/* One reading: small caption, large value, small unit. */
+static void draw_metric(cairo_t *c, struct tg_rect r, const char *caption,
+			const char *value, const char *unit, cairo_pattern_t *color)
 {
-	cairo_set_line_width(c,1);
+	tg_text(c, r.x, r.y, TG_FONT_LABEL, TG_TEXT_LABEL, text_faint, caption, NULL);
 
-	cairo_set_source(c,black);
-	cairo_paint(c);
-}
-
-static double print_s(cairo_t *c, double x, double y, char *s)
-{
-	cairo_text_extents_t extents;
-	cairo_move_to(c,x,y);
-	cairo_show_text(c,s);
-	cairo_text_extents(c,s,&extents);
-	x += extents.x_advance;
-	return x;
-}
-
-static double print_number(cairo_t *c, double x, double y, char *s)
-{
-	cairo_text_extents_t extents;
-	cairo_text_extents(c,"0",&extents);
-	double z = extents.x_advance;
-	char t[2];
-	t[1] = 0;
-	while((t[0] = *s++)) {
-		cairo_text_extents(c,t,&extents);
-		cairo_move_to(c, x + (z - extents.x_advance) / 2, y);
-		cairo_show_text(c,t);
-		x += z;
-	}
-	return x;
+	double vy = r.y + TG_FONT_LABEL + 7;
+	double vw = tg_text(c, r.x, vy, METRIC_FONT, TG_TEXT_VALUE, color, value, NULL);
+	if(unit)
+		tg_text(c, r.x + vw + 6, vy + METRIC_FONT - TG_FONT_LABEL - 5,
+			TG_FONT_LABEL + 2, TG_TEXT_BODY, text_dim, unit, NULL);
 }
 
 static gboolean output_draw_event(GtkWidget *widget, cairo_t *c, struct output_panel *op)
 {
 	UNUSED(widget);
-	cairo_init(c);
+	GtkAllocation a;
+	gtk_widget_get_allocation(op->output_drawing_area, &a);
+
+	struct tg_rect r = tg_draw_card(c, a.width, a.height, NULL);
+	cairo_set_line_width(c, 1);
 
 	struct snapshot *snst = op->snst;
 	struct processing_buffers *p = snst->pb;
 	int old = snst->is_old;
 
-	double x = draw_watch_icon(c,snst->signal,snst->calibrate ? snst->signal==NSTEPS : snst->signal, snst->is_light);
+	double x = draw_status(c, r, snst->signal,
+			snst->calibrate ? snst->signal == NSTEPS : snst->signal,
+			snst->is_light);
 
-	cairo_text_extents_t extents;
+	/* Separator between the badge and the readings */
+	cairo_set_source(c, card_border);
+	cairo_move_to(c, x - 5.5, r.y + 4);
+	cairo_line_to(c, x - 5.5, r.y + r.height - 4);
+	cairo_stroke(c);
 
-	cairo_set_font_size(c, OUTPUT_FONT);
-	cairo_text_extents(c,"0",&extents);
-	double y = (double)OUTPUT_WINDOW_HEIGHT/2 - extents.y_bearing - extents.height/2;
+	struct tg_rect cell = r;
+	cell.x = x + 6;
+	cell.width = r.x + r.width - cell.x;
 
 	if(snst->calibrate) {
-		cairo_set_source(c, white);
-		x = print_s(c,x,y,"cal");
-		cairo_set_font_size(c, OUTPUT_FONT*2/3);
-		x = print_s(c,x,y," (");
-		cairo_move_to(c,x,y);
-		{
-			double a = 0;
-			char *s[] = {"wait", "acq.", "done", "fail", NULL}, **t = s;
-			for(;*t;t++) {
-				cairo_text_extents(c,*t,&extents);
-				if(a < extents.x_advance) a = extents.x_advance;
-			}
-			x += a;
-		}
+		char s[32];
+		const char *state, *detail = NULL;
+		cairo_pattern_t *color;
+
 		switch(snst->cal_state) {
-			case 1:
-				cairo_set_source(c,green);
-				cairo_show_text(c,"done");
-				break;
-			case 0:
-				cairo_set_source(c, snst->signal == NSTEPS ? white : yellow);
-				cairo_show_text(c, snst->signal == NSTEPS ? "acq." : "wait");
-				break;
-			case -1:
-				cairo_set_source(c,red);
-				cairo_show_text(c,"fail");
-				break;
+		case 1:
+			state = "DONE"; color = green;
+			sprintf(s, "%s%d.%d", snst->cal_result < 0 ? "-" : "+",
+					abs(snst->cal_result) / 10, abs(snst->cal_result) % 10);
+			detail = s;
+			break;
+		case -1:
+			state = "FAILED"; color = red;
+			break;
+		default:
+			state = snst->signal == NSTEPS ? "ACQUIRING" : "WAITING";
+			color = snst->signal == NSTEPS ? white : yellow;
+			sprintf(s, "%d", snst->cal_percent);
+			detail = s;
+			break;
 		}
-		cairo_set_source(c, white);
-		x = print_s(c,x,y,")");
-		cairo_set_font_size(c, OUTPUT_FONT);
-		char s[20];
-		switch(snst->cal_state) {
-			case 1:
-				sprintf(s, " %s%d.%d",
-						snst->cal_result < 0 ? "-" : "+",
-						abs(snst->cal_result) / 10,
-						abs(snst->cal_result) % 10 );
-				x = print_s(c,x,y,s);
-				cairo_set_font_size(c, OUTPUT_FONT*2/3);
-				x = print_s(c,x,y," s/d");
-				break;
-			case 0:
-				sprintf(s, " %d", snst->cal_percent);
-				x = print_number(c,x,y,s);
-				x = print_s(c,x,y," %");
-				break;
-		}
+
+		const char *unit = snst->cal_state == 1 ? "s/d" :
+				   snst->cal_state == 0 ? "%" : NULL;
+		if(!detail) detail = "—";
+
+		struct tg_rect m = cell;
+		double vw = tg_text_width(c, METRIC_FONT, TG_TEXT_VALUE, detail);
+		if(unit) vw += 6 + tg_text_width(c, TG_FONT_LABEL+2, TG_TEXT_BODY, unit);
+		double cw = tg_text_width(c, TG_FONT_LABEL, TG_TEXT_LABEL, "CALIBRATION");
+		m.width = (vw > cw ? vw : cw) + METRIC_GAP;
+		draw_metric(c, m, "CALIBRATION", detail, unit, color);
+
+		m.x += m.width;
+		cairo_set_source(c, card_border);
+		cairo_move_to(c, m.x - METRIC_GAP/2 + .5, r.y + 6);
+		cairo_line_to(c, m.x - METRIC_GAP/2 + .5, r.y + r.height - 6);
+		cairo_stroke(c);
+
+		tg_text(c, m.x, m.y, TG_FONT_LABEL, TG_TEXT_LABEL, text_faint, "STATE", NULL);
+		tg_text(c, m.x, m.y + TG_FONT_LABEL + 10, METRIC_FONT*3/5, TG_TEXT_VALUE,
+			color, state, NULL);
 	} else {
-		char outputs[8][20];
+		char rate[16], be[16], amp[16], bph[16];
+		cairo_pattern_t *color = p && old ? yellow : white;
+		cairo_pattern_t *stale = p ? color : text_dim;
+
 		if(p) {
-			int rate = round(snst->rate);
-			double be = snst->be;
-			char rates[20];
-			sprintf(rates,"%s%d",rate > 0 ? "+" : rate < 0 ? "-" : "",abs(rate));
-			sprintf(outputs[0],"%4s",rates);
-			sprintf(outputs[2]," %4.1f",be);
-			if(snst->amp > 0)
-				sprintf(outputs[4]," %3.0f",snst->amp);
-			else
-				strcpy(outputs[4]," ---");
+			int r_i = round(snst->rate);
+			sprintf(rate, "%s%d", r_i > 0 ? "+" : r_i < 0 ? "−" : "", abs(r_i));
+			sprintf(be, "%.1f", snst->be);
+			if(snst->amp > 0) sprintf(amp, "%.0f°", snst->amp);
+			else strcpy(amp, "—");
 		} else {
-			strcpy(outputs[0],"----");
-			strcpy(outputs[2]," ----");
-			strcpy(outputs[4]," ---");
+			strcpy(rate, "—");
+			strcpy(be, "—");
+			strcpy(amp, "—");
 		}
-		sprintf(outputs[6]," %d",snst->guessed_bph);
+		sprintf(bph, "%d", snst->guessed_bph);
 
-		strcpy(outputs[1]," s/d");
-		strcpy(outputs[3]," ms");
-		strcpy(outputs[5]," deg");
-		strcpy(outputs[7]," bph");
-
+		const char *caps[4] = { "RATE", "BEAT ERROR", "AMPLITUDE", "FREQUENCY" };
+		const char *vals[4] = { rate, be, amp, bph };
+		const char *units[4] = { "s/d", "ms", NULL, "bph" };
 		int i;
-		for(i=0; i<8; i++) {
-			if(i%2) {
-				cairo_set_source(c, white);
-				cairo_set_font_size(c, OUTPUT_FONT*2/3);
-				x = print_s(c,x,y,outputs[i]);
-			} else {
-				cairo_set_source(c, i > 4 || !p || !old ? white : yellow);
-				cairo_set_font_size(c, OUTPUT_FONT);
-				x = print_number(c,x,y,outputs[i]);
+
+		/* Lay the readings out on their own width, so they stay together
+		   instead of drifting apart on a wide window. */
+		double w[4], total = 0;
+		for(i = 0; i < 4; i++) {
+			double vw = tg_text_width(c, METRIC_FONT, TG_TEXT_VALUE, vals[i]);
+			if(units[i]) vw += 6 + tg_text_width(c, TG_FONT_LABEL+2, TG_TEXT_BODY, units[i]);
+			double cw = tg_text_width(c, TG_FONT_LABEL, TG_TEXT_LABEL, caps[i]);
+			w[i] = (vw > cw ? vw : cw) + METRIC_GAP;
+			total += w[i];
+		}
+
+		/* Spread any slack evenly, up to a limit, and keep the group left */
+		double slack = cell.width - total;
+		if(slack > 0) {
+			double extra = slack / 4;
+			if(extra > METRIC_GAP) extra = METRIC_GAP;
+			for(i = 0; i < 4; i++) w[i] += extra;
+		}
+
+		double mx = cell.x;
+		for(i = 0; i < 4; i++) {
+			struct tg_rect m = cell;
+			m.x = mx;
+			m.width = w[i];
+			draw_metric(c, m, caps[i], vals[i], units[i],
+					i == 3 ? (p ? white : text_dim) : stale);
+			if(i) {
+				cairo_set_source(c, card_border);
+				cairo_move_to(c, mx - METRIC_GAP/2 + .5, r.y + 6);
+				cairo_line_to(c, mx - METRIC_GAP/2 + .5, r.y + r.height - 6);
+				cairo_stroke(c);
 			}
+			mx += w[i];
 		}
 	}
+
 #ifdef DEBUG
 	{
 		static GTimer *timer = NULL;
-		if (!timer) timer = g_timer_new();
+		if(!timer) timer = g_timer_new();
 		else {
-			char s[100];
-			sprintf(s,"  %.2f fps",1./g_timer_elapsed(timer, NULL));
-			cairo_set_source(c, white);
-			cairo_set_font_size(c, OUTPUT_FONT);
-			x = print_s(c,x,y,s);
+			char s[32];
+			sprintf(s, "%.0f fps", 1./g_timer_elapsed(timer, NULL));
+			tg_text(c, a.width - CARD_PAD - tg_text_width(c, TG_FONT_LABEL, TG_TEXT_BODY, s),
+				r.y, TG_FONT_LABEL, TG_TEXT_BODY, text_faint, s, NULL);
 			g_timer_reset(timer);
 		}
 	}
@@ -316,91 +310,74 @@ static void expose_waveform(
 			struct output_panel *op,
 			GtkWidget *da,
 			cairo_t *c,
+			const char *title,
 			int (*get_offset)(struct processing_buffers*),
 			double (*get_pulse)(struct processing_buffers*))
 {
-	cairo_init(c);
+	GtkAllocation alloc;
+	gtk_widget_get_allocation(da, &alloc);
+	struct tg_rect r = tg_draw_card(c, alloc.width, alloc.height, title);
 
-	GtkAllocation temp;
-	gtk_widget_get_allocation(da, &temp);
-
-	int width = temp.width;
-	int height = temp.height;
-
-	gtk_widget_get_allocation(gtk_widget_get_toplevel(da), &temp);
-	int font = temp.width / 90;
-	if(font < 12)
-		font = 12;
+	int width = r.width;
+	int height = r.height;
 	int i;
 
-	cairo_set_font_size(c,font);
+	cairo_save(c);
+	tg_rounded_rect(c, r.x, r.y, width, height, 4);
+	cairo_clip(c);
+	cairo_set_line_width(c, 1);
 
+	/* Time grid, on the lower half */
 	for(i = 1-NEGATIVE_SPAN; i < POSITIVE_SPAN; i++) {
-		int x = (NEGATIVE_SPAN + i) * width / (POSITIVE_SPAN + NEGATIVE_SPAN);
-		cairo_move_to(c, x + .5, height / 2 + .5);
-		cairo_line_to(c, x + .5, height - .5);
-		if(i%5)
-			cairo_set_source(c,grid_minor);
-		else
-			cairo_set_source(c,grid_major);
+		int x = r.x + (NEGATIVE_SPAN + i) * width / (POSITIVE_SPAN + NEGATIVE_SPAN);
+		cairo_move_to(c, x + .5, r.y + height / 2 + .5);
+		cairo_line_to(c, x + .5, r.y + height - .5);
+		cairo_set_source(c, i%5 ? grid_minor : grid_major);
 		cairo_stroke(c);
 	}
-	cairo_set_source(c,white);
 	for(i = 1-NEGATIVE_SPAN; i < POSITIVE_SPAN; i++) {
 		if(!(i%5)) {
-			int x = (NEGATIVE_SPAN + i) * width / (POSITIVE_SPAN + NEGATIVE_SPAN);
+			int x = r.x + (NEGATIVE_SPAN + i) * width / (POSITIVE_SPAN + NEGATIVE_SPAN);
 			char s[10];
 			sprintf(s,"%d",i);
-			cairo_move_to(c,x+font/4,height-font/2);
-			cairo_show_text(c,s);
+			tg_text(c, x + 4, r.y + height - AXIS_FONT - 3, AXIS_FONT,
+				TG_TEXT_BODY, text_faint, s, NULL);
 		}
 	}
-
-	cairo_text_extents_t extents;
-
-	cairo_text_extents(c,"ms",&extents);
-	cairo_move_to(c,width - extents.x_advance - font/4,height-font/2);
-	cairo_show_text(c,"ms");
+	tg_text(c, r.x + width - tg_text_width(c, AXIS_FONT, TG_TEXT_LABEL, "ms") - 2,
+		r.y + height - AXIS_FONT - 3, AXIS_FONT, TG_TEXT_LABEL, text_dim, "ms", NULL);
 
 	struct snapshot *snst = op->snst;
 	struct processing_buffers *p = snst->pb;
 	int old = snst->is_old;
 	double period = p ? p->period / snst->sample_rate : 7200. / snst->guessed_bph;
 
+	/* Amplitude grid, on the upper half */
 	for(i = 10; i < 360; i+=10) {
 		if(2*i < snst->la) continue;
 		double t = period*amplitude_to_time(snst->la,i);
 		if(t > .001 * NEGATIVE_SPAN) continue;
-		int x = round(width * (NEGATIVE_SPAN - 1000*t) / (NEGATIVE_SPAN + POSITIVE_SPAN));
-		cairo_move_to(c, x+.5, .5);
-		cairo_line_to(c, x+.5, height / 2 + .5);
-		if(i % 50)
-			cairo_set_source(c,grid_minor);
-		else
-			cairo_set_source(c,grid_major);
+		int x = r.x + round(width * (NEGATIVE_SPAN - 1000*t) / (NEGATIVE_SPAN + POSITIVE_SPAN));
+		cairo_move_to(c, x+.5, r.y + .5);
+		cairo_line_to(c, x+.5, r.y + height / 2 + .5);
+		cairo_set_source(c, i % 50 ? grid_minor : grid_major);
 		cairo_stroke(c);
 	}
 
 	double last_x = 0;
-	cairo_set_source(c,white);
 	for(i = 50; i < 360; i+=50) {
 		double t = period*amplitude_to_time(snst->la,i);
 		if(t > .001 * NEGATIVE_SPAN) continue;
-		int x = round(width * (NEGATIVE_SPAN - 1000*t) / (NEGATIVE_SPAN + POSITIVE_SPAN));
+		int x = r.x + round(width * (NEGATIVE_SPAN - 1000*t) / (NEGATIVE_SPAN + POSITIVE_SPAN));
 		if(x > last_x) {
 			char s[10];
-
 			sprintf(s,"%d",abs(i));
-			cairo_move_to(c, x + font/4, font * 3 / 2);
-			cairo_show_text(c,s);
-			cairo_text_extents(c,s,&extents);
-			last_x = x + font/4 + extents.x_advance;
+			last_x = x + 4 + tg_text(c, x + 4, r.y + 2, AXIS_FONT,
+					TG_TEXT_BODY, text_faint, s, NULL);
 		}
 	}
-
-	cairo_text_extents(c,"deg",&extents);
-	cairo_move_to(c,width - extents.x_advance - font/4,font * 3 / 2);
-	cairo_show_text(c,"deg");
+	tg_text(c, r.x + width - tg_text_width(c, AXIS_FONT, TG_TEXT_LABEL, "deg") - 2,
+		r.y + 2, AXIS_FONT, TG_TEXT_LABEL, text_dim, "deg", NULL);
 
 	if(p) {
 		double span = 0.001 * snst->sample_rate;
@@ -409,27 +386,27 @@ static void expose_waveform(
 		double a = offset - span * NEGATIVE_SPAN;
 		double b = offset + span * POSITIVE_SPAN;
 
-		draw_graph(a,b,c,p,da);
-
-		cairo_set_source(c,old?yellow:white);
-		cairo_stroke_preserve(c);
-		cairo_fill(c);
+		draw_graph(a,b,c,p,r);
+		fill_trace(c, r, old);
 
 		double pulse = get_pulse(p);
 		if(pulse > 0) {
-			int x = round((NEGATIVE_SPAN - pulse / span) * width / (POSITIVE_SPAN + NEGATIVE_SPAN));
-			cairo_move_to(c, x, 1);
-			cairo_line_to(c, x, height - 1);
+			int x = r.x + round((NEGATIVE_SPAN - pulse / span) * width / (POSITIVE_SPAN + NEGATIVE_SPAN));
+			cairo_move_to(c, x + .5, r.y + 1);
+			cairo_line_to(c, x + .5, r.y + height - 1);
 			cairo_set_source(c,blue);
 			cairo_set_line_width(c,2);
 			cairo_stroke(c);
+			cairo_set_line_width(c,1);
 		}
 	} else {
-		cairo_move_to(c, .5, height / 2 + .5);
-		cairo_line_to(c, width - .5, height / 2 + .5);
+		/* No signal: a flat line where the trace would be */
+		cairo_move_to(c, r.x + .5, r.y + height / 2 + .5);
+		cairo_line_to(c, r.x + width - .5, r.y + height / 2 + .5);
 		cairo_set_source(c,yellow);
 		cairo_stroke(c);
 	}
+	cairo_restore(c);
 }
 
 static int get_tic(struct processing_buffers *p)
@@ -455,84 +432,83 @@ static double get_toc_pulse(struct processing_buffers *p)
 static gboolean tic_draw_event(GtkWidget *widget, cairo_t *c, struct output_panel *op)
 {
 	UNUSED(widget);
-	expose_waveform(op, op->tic_drawing_area, c, get_tic, get_tic_pulse);
+	expose_waveform(op, op->tic_drawing_area, c, "TIC", get_tic, get_tic_pulse);
 	return FALSE;
 }
 
 static gboolean toc_draw_event(GtkWidget *widget, cairo_t *c, struct output_panel *op)
 {
 	UNUSED(widget);
-	expose_waveform(op, op->toc_drawing_area, c, get_toc, get_toc_pulse);
+	expose_waveform(op, op->toc_drawing_area, c, "TOC", get_toc, get_toc_pulse);
 	return FALSE;
 }
 
 static gboolean period_draw_event(GtkWidget *widget, cairo_t *c, struct output_panel *op)
 {
 	UNUSED(widget);
-	cairo_init(c);
+	GtkAllocation alloc;
+	gtk_widget_get_allocation(op->period_drawing_area, &alloc);
+	struct tg_rect r = tg_draw_card(c, alloc.width, alloc.height, "PERIOD");
 
-	GtkAllocation temp;
-	gtk_widget_get_allocation (op->period_drawing_area, &temp);
-
-	int width = temp.width;
-	int height = temp.height;
+	int width = r.width;
+	int height = r.height;
 
 	struct snapshot *snst = op->snst;
 	struct processing_buffers *p = snst->pb;
 	int old = snst->is_old;
 
 	double toc,a=0,b=0;
+	cairo_save(c);
+	tg_rounded_rect(c, r.x, r.y, width, height, 4);
+	cairo_clip(c);
+	cairo_set_line_width(c, 1);
 
 	if(p) {
+		/* The windows shown enlarged in the tic and toc views */
 		toc = p->tic < p->toc ? p->toc : p->toc + p->period;
 		a = ((double)p->tic + toc)/2 - p->period/2;
 		b = ((double)p->tic + toc)/2 + p->period/2;
 
-		cairo_move_to(c, (p->tic - a - NEGATIVE_SPAN*.001*snst->sample_rate) * width/p->period, 0);
-		cairo_line_to(c, (p->tic - a - NEGATIVE_SPAN*.001*snst->sample_rate) * width/p->period, height);
-		cairo_line_to(c, (p->tic - a + POSITIVE_SPAN*.001*snst->sample_rate) * width/p->period, height);
-		cairo_line_to(c, (p->tic - a + POSITIVE_SPAN*.001*snst->sample_rate) * width/p->period, 0);
-		cairo_set_source(c,blueish);
-		cairo_fill(c);
+		int k;
+		for(k = 0; k < 2; k++) {
+			double centre = k ? toc : p->tic;
+			double x0 = r.x + (centre - a - NEGATIVE_SPAN*.001*snst->sample_rate) * width/p->period;
+			double x1 = r.x + (centre - a + POSITIVE_SPAN*.001*snst->sample_rate) * width/p->period;
+			tg_rounded_rect(c, x0, r.y, x1-x0, height, 4);
+			cairo_set_source(c, band);
+			cairo_fill(c);
 
-		cairo_move_to(c, (toc - a - NEGATIVE_SPAN*.001*snst->sample_rate) * width/p->period, 0);
-		cairo_line_to(c, (toc - a - NEGATIVE_SPAN*.001*snst->sample_rate) * width/p->period, height);
-		cairo_line_to(c, (toc - a + POSITIVE_SPAN*.001*snst->sample_rate) * width/p->period, height);
-		cairo_line_to(c, (toc - a + POSITIVE_SPAN*.001*snst->sample_rate) * width/p->period, 0);
-		cairo_set_source(c,blueish);
-		cairo_fill(c);
+			tg_text(c, x0 + 5, r.y + 2, AXIS_FONT, TG_TEXT_LABEL, text_faint,
+				k ? "TOC" : "TIC", NULL);
+		}
 	}
 
 	int i;
 	for(i = 1; i < 16; i++) {
-		int x = i * width / 16;
-		cairo_move_to(c, x+.5, .5);
-		cairo_line_to(c, x+.5, height - .5);
-		if(i % 4)
-			cairo_set_source(c,grid_minor);
-		else
-			cairo_set_source(c,grid_major);
+		int x = r.x + i * width / 16;
+		cairo_move_to(c, x+.5, r.y + .5);
+		cairo_line_to(c, x+.5, r.y + height - .5);
+		cairo_set_source(c, i % 4 ? grid_minor : grid_major);
 		cairo_stroke(c);
 	}
 
 	if(p) {
-		draw_graph(a,b,c,p,op->period_drawing_area);
-
-		cairo_set_source(c,old?yellow:white);
-		cairo_stroke_preserve(c);
-		cairo_fill(c);
+		draw_graph(a,b,c,p,r);
+		fill_trace(c, r, old);
 	} else {
-		cairo_move_to(c, .5, height / 2 + .5);
-		cairo_line_to(c, width - .5, height / 2 + .5);
+		cairo_move_to(c, r.x + .5, r.y + height / 2 + .5);
+		cairo_line_to(c, r.x + width - .5, r.y + height / 2 + .5);
 		cairo_set_source(c,yellow);
 		cairo_stroke(c);
 	}
+	cairo_restore(c);
 
 	return FALSE;
 }
 
 static gboolean paperstrip_draw_event(GtkWidget *widget, cairo_t *c, struct output_panel *op)
 {
+	UNUSED(widget);
 	int i;
 	struct snapshot *snst = op->snst;
 	uint64_t time = snst->timestamp ? snst->timestamp : get_timestamp(snst->is_light);
@@ -550,13 +526,12 @@ static gboolean paperstrip_draw_event(GtkWidget *widget, cairo_t *c, struct outp
 			slope = - snst->rate * zoom_factor / (3600. * 24.);
 	}
 
-	cairo_init(c);
+	GtkAllocation alloc;
+	gtk_widget_get_allocation(op->paperstrip_drawing_area, &alloc);
+	struct tg_rect r = tg_draw_card(c, alloc.width, alloc.height, "TRACE");
 
-	GtkAllocation temp;
-	gtk_widget_get_allocation (op->paperstrip_drawing_area, &temp);
-
-	int width = temp.width;
-	int height = temp.height;
+	int width = r.width;
+	int height = r.height;
 
 	int stopped = 0;
 	if( snst->events_count &&
@@ -567,119 +542,130 @@ static gboolean paperstrip_draw_event(GtkWidget *widget, cairo_t *c, struct outp
 	}
 
 	int strip_width = round(width / (1 + PAPERSTRIP_MARGIN));
+	int left_margin = (width - strip_width) / 2;
+	int right_margin = (width + strip_width) / 2;
 
-	cairo_set_line_width(c,1.3);
+	/* Clip everything to the card, so the trace cannot spill over the edge */
+	cairo_save(c);
+	tg_rounded_rect(c, r.x, r.y, width, height, 4);
+	cairo_clip(c);
 
+	/* Time rules, labelled once a minute */
+	double now = sweep*ceil(time/sweep);
+	double ten_s = snst->sample_rate * 10 / sweep;
+	double last_line = fmod(now/sweep, ten_s);
+	int last_tenth = floor(now/(sweep*ten_s));
+	cairo_set_line_width(c, 1);
+	for(i=0;;i++) {
+		double y = r.y + 0.5 + round(last_line + i*ten_s);
+		if(y > r.y + height) break;
+		int major = !((last_tenth-i)%6);
+		cairo_move_to(c, r.x + .5, y);
+		cairo_line_to(c, r.x + width - .5, y);
+		cairo_set_source(c, major ? grid_major : grid_minor);
+		cairo_stroke(c);
+	}
+
+	/* The strip the trace is folded into */
+	cairo_set_source(c, grid_major);
+	cairo_move_to(c, r.x + left_margin + .5, r.y + .5);
+	cairo_line_to(c, r.x + left_margin + .5, r.y + height - .5);
+	cairo_move_to(c, r.x + right_margin + .5, r.y + .5);
+	cairo_line_to(c, r.x + right_margin + .5, r.y + height - .5);
+	cairo_stroke(c);
+
+	/* Lines of constant rate, so a drifting trace can be read off */
 	slope *= strip_width;
 	if(slope <= 2 && slope >= -2) {
+		cairo_set_line_width(c, 1);
 		for(i=0; i<4; i++) {
 			double y = 0;
-			cairo_move_to(c, (double)width * (i+.5) / 4, 0);
+			cairo_move_to(c, r.x + (double)width * (i+.5) / 4, r.y);
 			for(;;) {
 				double x = y * slope + (double)width * (i+.5) / 4;
 				x = fmod(x, width);
 				if(x < 0) x += width;
 				double nx = x + slope * (height - y);
 				if(nx >= 0 && nx <= width) {
-					cairo_line_to(c, nx, height);
+					cairo_line_to(c, r.x + nx, r.y + height);
 					break;
 				} else {
 					double d = slope > 0 ? width - x : x;
 					y += d / fabs(slope);
-					cairo_line_to(c, slope > 0 ? width : 0, y);
+					cairo_line_to(c, slope > 0 ? r.x + width : r.x, r.y + y);
 					y += 1;
 					if(y > height) break;
-					cairo_move_to(c, slope > 0 ? 0 : width, y);
+					cairo_move_to(c, slope > 0 ? r.x : r.x + width, r.y + y);
 				}
 			}
 		}
-		cairo_set_source(c, blue);
+		cairo_set_source(c, band_line);
 		cairo_stroke(c);
+		cairo_set_line_width(c, 1);
 	}
 
-	cairo_set_line_width(c,1);
-
-	int left_margin = (width - strip_width) / 2;
-	int right_margin = (width + strip_width) / 2;
-	cairo_move_to(c, left_margin + .5, .5);
-	cairo_line_to(c, left_margin + .5, height - .5);
-	cairo_move_to(c, right_margin + .5, .5);
-	cairo_line_to(c, right_margin + .5, height - .5);
-	cairo_set_source(c, highlight);
-	cairo_stroke(c);
-
-	double now = sweep*ceil(time/sweep);
-	double ten_s = snst->sample_rate * 10 / sweep;
-	double last_line = fmod(now/sweep, ten_s);
-	int last_tenth = floor(now/(sweep*ten_s));
-	for(i=0;;i++) {
-		double y = 0.5 + round(last_line + i*ten_s);
-		if(y > height) break;
-		cairo_move_to(c, .5, y);
-		cairo_line_to(c, width-.5, y);
-		cairo_set_source(c, (last_tenth-i)%6 ? grid_minor : grid_major);
-		cairo_stroke(c);
-	}
-
-	cairo_set_source(c,stopped?yellow:white);
+	/* The beats themselves */
+	cairo_set_source(c, stopped ? yellow : white);
 	for(i = snst->events_wp;;) {
 		if(!snst->events_count || !snst->events[i]) break;
 		double event = now - snst->events[i] + snst->trace_centering + sweep * PAPERSTRIP_MARGIN / (2 * zoom_factor);
 		int column = floor(fmod(event, (sweep / zoom_factor)) * strip_width / (sweep / zoom_factor));
 		int row = floor(event / sweep);
 		if(row >= height) break;
-		cairo_move_to(c,column,row);
-		cairo_line_to(c,column+1,row);
-		cairo_line_to(c,column+1,row+1);
-		cairo_line_to(c,column,row+1);
-		cairo_line_to(c,column,row);
+		cairo_rectangle(c, r.x + column - .5, r.y + row - .5, BEAT_DOT, BEAT_DOT);
 		cairo_fill(c);
 		if(column < width - strip_width && row > 0) {
-			column += strip_width;
-			row -= 1;
-			cairo_move_to(c,column,row);
-			cairo_line_to(c,column+1,row);
-			cairo_line_to(c,column+1,row+1);
-			cairo_line_to(c,column,row+1);
-			cairo_line_to(c,column,row);
+			cairo_rectangle(c, r.x + column + strip_width - .5,
+					r.y + row - 1.5, BEAT_DOT, BEAT_DOT);
 			cairo_fill(c);
 		}
 		if(--i < 0) i = snst->events_count - 1;
 		if(i == snst->events_wp) break;
 	}
 
-	cairo_set_source(c,white);
-	cairo_set_line_width(c,2);
-	cairo_move_to(c, left_margin + 3, height - 20.5);
-	cairo_line_to(c, right_margin - 3, height - 20.5);
-	cairo_stroke(c);
-	cairo_set_line_width(c,1);
-	cairo_move_to(c, left_margin + .5, height - 20.5);
-	cairo_line_to(c, left_margin + 5.5, height - 15.5);
-	cairo_line_to(c, left_margin + 5.5, height - 25.5);
-	cairo_line_to(c, left_margin + .5, height - 20.5);
-	cairo_fill(c);
-	cairo_move_to(c, right_margin + .5, height - 20.5);
-	cairo_line_to(c, right_margin - 4.5, height - 15.5);
-	cairo_line_to(c, right_margin - 4.5, height - 25.5);
-	cairo_line_to(c, right_margin + .5, height - 20.5);
-	cairo_fill(c);
+	/* Elapsed time, drawn last so the beats do not run through the digits */
+	for(i=1;;i++) {
+		double y = r.y + 0.5 + round(last_line + i*ten_s);
+		if(y > r.y + height - AXIS_FONT) break;
+		if((last_tenth-i)%6) continue;
+		char s[16];
+		sprintf(s, "%ds", i*10);
+		double tw = tg_text_width(c, AXIS_FONT, TG_TEXT_BODY, s);
+		tg_rounded_rect(c, r.x + 1, y + 1, tw + 9, AXIS_FONT + 5, 3);
+		cairo_set_source(c, card_bg);
+		cairo_fill(c);
+		tg_text(c, r.x + 5, y + 2, AXIS_FONT, TG_TEXT_BODY, text_dim, s, NULL);
+	}
+	cairo_restore(c);
 
-	char s[100];
-	cairo_text_extents_t extents;
-
-	gtk_widget_get_allocation(gtk_widget_get_toplevel(widget), &temp);
-	int font = temp.width / 90;
-	if(font < 12)
-		font = 12;
-	cairo_set_font_size(c,font);
-
+	/* Scale bar across the strip */
+	char s[64];
 	sprintf(s, "%.1f ms", snst->calibrate ?
 				1000. / zoom_factor :
 				3600000. / (snst->guessed_bph * zoom_factor));
-	cairo_text_extents(c,s,&extents);
-	cairo_move_to(c, (width - extents.x_advance)/2, height - 30);
-	cairo_show_text(c,s);
+	double tw = tg_text_width(c, AXIS_FONT, TG_TEXT_BODY, s);
+	double sy = r.y + height - 16.5;
+	double mid = r.x + width/2.0;
+
+	cairo_set_source(c, text_dim);
+	cairo_set_line_width(c, 1);
+	cairo_move_to(c, r.x + left_margin + 4, sy);
+	cairo_line_to(c, mid - tw/2 - 6, sy);
+	cairo_move_to(c, mid + tw/2 + 6, sy);
+	cairo_line_to(c, r.x + right_margin - 4, sy);
+	cairo_stroke(c);
+
+	cairo_move_to(c, r.x + left_margin + .5, sy);
+	cairo_line_to(c, r.x + left_margin + 5.5, sy - 3.5);
+	cairo_line_to(c, r.x + left_margin + 5.5, sy + 3.5);
+	cairo_close_path(c);
+	cairo_move_to(c, r.x + right_margin + .5, sy);
+	cairo_line_to(c, r.x + right_margin - 4.5, sy - 3.5);
+	cairo_line_to(c, r.x + right_margin - 4.5, sy + 3.5);
+	cairo_close_path(c);
+	cairo_fill(c);
+
+	tg_text(c, mid - tw/2, sy - AXIS_FONT/2 - 2, AXIS_FONT, TG_TEXT_BODY, text_dim, s, NULL);
 
 	return FALSE;
 }
@@ -688,7 +674,9 @@ static gboolean paperstrip_draw_event(GtkWidget *widget, cairo_t *c, struct outp
 static gboolean debug_draw_event(GtkWidget *widget, cairo_t *c, struct output_panel *op)
 {
 	UNUSED(widget);
-	cairo_init(c);
+	GtkAllocation alloc;
+	gtk_widget_get_allocation(op->debug_drawing_area, &alloc);
+	struct tg_rect r = tg_draw_card(c, alloc.width, alloc.height, "DEBUG");
 
 	struct snapshot *snst = op->snst;
 	struct processing_buffers *p;
@@ -701,7 +689,7 @@ static gboolean debug_draw_event(GtkWidget *widget, cairo_t *c, struct output_pa
 		double a = snst->nominal_sr / 10;
 		double b = snst->nominal_sr * 2;
 
-		draw_debug_graph(a,b,c,p,op->debug_drawing_area);
+		draw_debug_graph(a,b,c,p,r);
 
 		cairo_set_source(c,snst->is_old?yellow:white);
 		cairo_stroke(c);
