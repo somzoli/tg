@@ -219,6 +219,12 @@ void op_set_snapshot(struct output_panel *op, struct snapshot *snst);
 void op_set_border(struct output_panel *op, int i);
 void op_destroy(struct output_panel *op);
 
+/* style.c */
+void tg_style_init(void);
+void tg_add_class(GtkWidget *widget, const char *class_name);
+GtkWidget *tg_icon_button(const char *icon_name, const char *fallback, const char *tooltip);
+GtkWidget *tg_labelled_control(const char *caption, GtkWidget *control);
+
 /* interface.c */
 struct main_window {
 	GtkApplication *app;

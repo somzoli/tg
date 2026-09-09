@@ -11,6 +11,11 @@ in this
 in particular the calibration procedure is described at
 [this post](http://forums.watchuseek.com/f6/open-source-timing-software-2542874-post29970370.html).
 
+## In 2026
+- New UI design
+- Some improvements and fixes
+- Added macOS build script
+
 ## Install instructions
 
 Tg is known to work under Microsoft Windows, OS X, and Linux. Moreover it
@@ -39,6 +44,19 @@ To install tg, run
 You can now launch tg by typing
 
 	tg-timer &
+
+#### Building from source on macOS
+
+The script `build-macos.sh` builds tg against the Homebrew libraries:
+
+	./build-macos.sh --deps     # install gtk+3, portaudio, fftw, autotools
+	./build-macos.sh            # build ./tg-timer
+	./build-macos.sh --app      # also create dist/Tg.app
+	./build-macos.sh --run      # build and launch
+
+Run `./build-macos.sh --help` for all the options. The generated `Tg.app`
+links against the Homebrew libraries of the machine it was built on, so it
+is meant for local use rather than for distribution.
 
 ### Debian or Debian-based (e.g. Mint, Ubuntu)
 

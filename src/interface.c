@@ -694,6 +694,34 @@ static void load(GtkMenuItem *m, struct main_window *w)
 	gtk_widget_destroy(dialog);
 }
 
+/* gtk+ 3.10 introduced GtkHeaderBar; older bundles keep the plain layout. */
+#if !defined(WIN_XP) && GTK_CHECK_VERSION(3,10,0)
+#define TG_HEADERBAR
+#endif
+
+/* Put an action widget in the title bar, or in the toolbar as a fallback. */
+static void pack_action_start(GtkWidget *header, GtkWidget *box, GtkWidget *child)
+{
+#ifdef TG_HEADERBAR
+	UNUSED(box);
+	gtk_header_bar_pack_start(GTK_HEADER_BAR(header), child);
+#else
+	UNUSED(header);
+	gtk_box_pack_start(GTK_BOX(box), child, FALSE, FALSE, 0);
+#endif
+}
+
+static void pack_action_end(GtkWidget *header, GtkWidget *box, GtkWidget *child)
+{
+#ifdef TG_HEADERBAR
+	UNUSED(box);
+	gtk_header_bar_pack_end(GTK_HEADER_BAR(header), child);
+#else
+	UNUSED(header);
+	gtk_box_pack_end(GTK_BOX(box), child, FALSE, FALSE, 0);
+#endif
+}
+
 /* Set up the main window and populate with widgets */
 static void init_main_window(struct main_window *w)
 {
@@ -701,25 +729,37 @@ static void init_main_window(struct main_window *w)
 
 	gtk_widget_set_size_request(w->window, 950, 700);
 
-	gtk_container_set_border_width(GTK_CONTAINER(w->window), 10);
+	gtk_container_set_border_width(GTK_CONTAINER(w->window), 12);
 	g_signal_connect(w->window, "delete_event", G_CALLBACK(delete_event), w);
 
 	gtk_window_set_title(GTK_WINDOW(w->window), PROGRAM_NAME " " VERSION);
 	gtk_window_set_icon_name (GTK_WINDOW(w->window), PACKAGE);
 
-	GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+	// Title bar
+	GtkWidget *header = NULL;
+#ifdef TG_HEADERBAR
+	header = gtk_header_bar_new();
+	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
+	gtk_header_bar_set_title(GTK_HEADER_BAR(header), PROGRAM_NAME);
+	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header), "Watch timing " VERSION);
+	gtk_window_set_titlebar(GTK_WINDOW(w->window), header);
+#endif
+
+	GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
 	gtk_container_add(GTK_CONTAINER(w->window), vbox);
 
-	GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+	// Measurement controls
+	GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 16);
+	tg_add_class(hbox, "tg-toolbar");
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, FALSE, FALSE, 0);
-
-	// BPH label
-	GtkWidget *label = gtk_label_new("bph");
-	gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 0);
 
 	// BPH combo box
 	w->bph_combo_box = gtk_combo_box_text_new_with_entry();
-	gtk_box_pack_start(GTK_BOX(hbox), w->bph_combo_box, FALSE, FALSE, 0);
+	gtk_entry_set_width_chars(GTK_ENTRY(gtk_bin_get_child(GTK_BIN(w->bph_combo_box))), 8);
+	gtk_widget_set_tooltip_text(w->bph_combo_box,
+			"Beats per hour of the movement, or \"guess\" to detect it");
+	gtk_box_pack_start(GTK_BOX(hbox), tg_labelled_control("RATE (bph)", w->bph_combo_box),
+			FALSE, FALSE, 0);
 	// Fill in pre-defined values
 	gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(w->bph_combo_box), "guess");
 	int i,current = 0;
@@ -739,23 +779,20 @@ static void init_main_window(struct main_window *w)
 	}
 	g_signal_connect (w->bph_combo_box, "changed", G_CALLBACK(handle_bph_change), w);
 
-	// Lift angle label
-	label = gtk_label_new("lift angle");
-	gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 0);
-
 	// Lift angle spin button
 	w->la_spin_button = gtk_spin_button_new_with_range(MIN_LA, MAX_LA, 1);
-	gtk_box_pack_start(GTK_BOX(hbox), w->la_spin_button, FALSE, FALSE, 0);
+	gtk_entry_set_width_chars(GTK_ENTRY(w->la_spin_button), 5);
+	gtk_widget_set_tooltip_text(w->la_spin_button, "Lift angle of the escapement, in degrees");
+	gtk_box_pack_start(GTK_BOX(hbox), tg_labelled_control("LIFT ANGLE", w->la_spin_button),
+			FALSE, FALSE, 0);
 	gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->la_spin_button), w->la);
 	g_signal_connect(w->la_spin_button, "value_changed", G_CALLBACK(handle_la_change), w);
 
-	// Calibration label
-	label = gtk_label_new("cal");
-	gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 0);
-
 	// Calibration spin button
 	w->cal_spin_button = gtk_spin_button_new_with_range(MIN_CAL, MAX_CAL, 1);
-	gtk_box_pack_start(GTK_BOX(hbox), w->cal_spin_button, FALSE, FALSE, 0);
+	gtk_widget_set_tooltip_text(w->cal_spin_button, "Calibration of the sound card, in s/d");
+	gtk_box_pack_start(GTK_BOX(hbox), tg_labelled_control("CALIBRATION", w->cal_spin_button),
+			FALSE, FALSE, 0);
 	gtk_spin_button_set_value(GTK_SPIN_BUTTON(w->cal_spin_button), w->cal);
 	gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(w->cal_spin_button), FALSE);
 	gtk_entry_set_width_chars(GTK_ENTRY(w->cal_spin_button), 6);
@@ -763,27 +800,33 @@ static void init_main_window(struct main_window *w)
 	g_signal_connect(w->cal_spin_button, "output", G_CALLBACK(output_cal), NULL);
 	g_signal_connect(w->cal_spin_button, "input", G_CALLBACK(input_cal), NULL);
 
-	// Is there a more elegant way?
+	// Push whatever stays in the toolbar to the right
 	GtkWidget *empty = gtk_label_new("");
 	gtk_box_pack_start(GTK_BOX(hbox), empty, TRUE, FALSE, 0);
 
 	// Snapshot button
 	w->snapshot_button = gtk_button_new_with_label("Take Snapshot");
-	gtk_box_pack_start(GTK_BOX(hbox), w->snapshot_button, FALSE, FALSE, 0);
+#if !defined(WIN_XP)
+	gtk_button_set_image(GTK_BUTTON(w->snapshot_button),
+			gtk_image_new_from_icon_name("camera-photo-symbolic", GTK_ICON_SIZE_BUTTON));
+	gtk_button_set_always_show_image(GTK_BUTTON(w->snapshot_button), TRUE);
+#endif
+	tg_add_class(w->snapshot_button, "suggested-action");
+	gtk_widget_set_tooltip_text(w->snapshot_button, "Freeze the current display in a new tab");
+	pack_action_start(header, hbox, w->snapshot_button);
 	gtk_widget_set_sensitive(w->snapshot_button, FALSE);
 	g_signal_connect(w->snapshot_button, "clicked", G_CALLBACK(handle_snapshot), w);
 
 	// Snapshot name field
-	GtkWidget *name_label = gtk_label_new("Current snapshot:");
+	GtkWidget *name_label = gtk_label_new("Snapshot");
+	tg_add_class(name_label, "tg-caption");
 	w->snapshot_name_entry = gtk_entry_new();
-	w->snapshot_name = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+	gtk_entry_set_placeholder_text(GTK_ENTRY(w->snapshot_name_entry), "Snapshot name");
+	w->snapshot_name = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
 	gtk_box_pack_start(GTK_BOX(w->snapshot_name), name_label, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(w->snapshot_name), w->snapshot_name_entry, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), w->snapshot_name, FALSE, FALSE, 0);
+	pack_action_start(header, hbox, w->snapshot_name);
 	g_signal_connect(w->snapshot_name_entry, "changed", G_CALLBACK(handle_name_change), w);
-
-	empty = gtk_label_new("");
-	gtk_box_pack_start(GTK_BOX(hbox), empty, TRUE, FALSE, 0);
 
 	// Command menu
 	GtkWidget *command_menu = gtk_menu_new();
@@ -794,10 +837,12 @@ static void init_main_window(struct main_window *w)
 	GtkWidget *image = gtk_image_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR);
 #endif
 	gtk_button_set_image(GTK_BUTTON(command_menu_button), image);
+	tg_add_class(command_menu_button, "flat");
+	gtk_widget_set_tooltip_text(command_menu_button, "Menu");
 	g_object_set(G_OBJECT(command_menu_button), "direction", GTK_ARROW_DOWN, NULL);
 	g_object_set(G_OBJECT(command_menu), "halign", GTK_ALIGN_END, NULL);
 	gtk_menu_button_set_popup(GTK_MENU_BUTTON(command_menu_button), command_menu);
-	gtk_box_pack_end(GTK_BOX(hbox), command_menu_button, FALSE, FALSE, 0);
+	pack_action_end(header, hbox, command_menu_button);
 	
 	// ... Open
 	GtkWidget *open_item = gtk_menu_item_new_with_label("Open");
@@ -860,6 +905,7 @@ static void init_main_window(struct main_window *w)
 
 	gtk_window_maximize(GTK_WINDOW(w->window));
 	gtk_widget_show_all(w->window);
+	if(header) gtk_widget_show_all(header);
 	gtk_widget_hide(w->snapshot_name);
 	gtk_window_set_focus(GTK_WINDOW(w->window), NULL);
 }
@@ -914,6 +960,7 @@ static void start_interface(GApplication* app, void *p)
 	double real_sr;
 
 	initialize_palette();
+	tg_style_init();
 
 	struct main_window *w = malloc(sizeof(struct main_window));
 

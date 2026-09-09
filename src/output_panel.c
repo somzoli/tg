@@ -19,6 +19,8 @@
 #include "tg.h"
 
 cairo_pattern_t *black,*white,*red,*green,*blue,*blueish,*yellow;
+/* Chart decorations, kept apart from the status colours above */
+cairo_pattern_t *grid_minor,*grid_major,*highlight;
 
 static void define_color(cairo_pattern_t **gc,double r,double g,double b)
 {
@@ -27,13 +29,16 @@ static void define_color(cairo_pattern_t **gc,double r,double g,double b)
 
 void initialize_palette()
 {
-	define_color(&black,0,0,0);
-	define_color(&white,1,1,1);
-	define_color(&red,1,0,0);
-	define_color(&green,0,0.8,0);
-	define_color(&blue,0,0,1);
-	define_color(&blueish,0,0,.5);
-	define_color(&yellow,1,1,0);
+	define_color(&black,.07,.08,.10);		// background
+	define_color(&white,.91,.93,.96);		// traces and labels
+	define_color(&red,.95,.35,.35);			// failure
+	define_color(&green,.24,.80,.45);		// success
+	define_color(&blue,.30,.55,1);			// rate line, pulse marker
+	define_color(&blueish,.11,.15,.26);		// tic/toc bands
+	define_color(&yellow,.98,.78,.28);		// stale data
+	define_color(&grid_minor,.15,.17,.21);		// minor grid lines
+	define_color(&grid_major,.27,.30,.37);		// labelled grid lines
+	define_color(&highlight,.30,.55,1);		// strip borders
 }
 
 static void draw_graph(double a, double b, cairo_t *c, struct processing_buffers *p, GtkWidget *da)
@@ -335,9 +340,9 @@ static void expose_waveform(
 		cairo_move_to(c, x + .5, height / 2 + .5);
 		cairo_line_to(c, x + .5, height - .5);
 		if(i%5)
-			cairo_set_source(c,green);
+			cairo_set_source(c,grid_minor);
 		else
-			cairo_set_source(c,red);
+			cairo_set_source(c,grid_major);
 		cairo_stroke(c);
 	}
 	cairo_set_source(c,white);
@@ -370,9 +375,9 @@ static void expose_waveform(
 		cairo_move_to(c, x+.5, .5);
 		cairo_line_to(c, x+.5, height / 2 + .5);
 		if(i % 50)
-			cairo_set_source(c,green);
+			cairo_set_source(c,grid_minor);
 		else
-			cairo_set_source(c,red);
+			cairo_set_source(c,grid_major);
 		cairo_stroke(c);
 	}
 
@@ -504,9 +509,9 @@ static gboolean period_draw_event(GtkWidget *widget, cairo_t *c, struct output_p
 		cairo_move_to(c, x+.5, .5);
 		cairo_line_to(c, x+.5, height - .5);
 		if(i % 4)
-			cairo_set_source(c,green);
+			cairo_set_source(c,grid_minor);
 		else
-			cairo_set_source(c,red);
+			cairo_set_source(c,grid_major);
 		cairo_stroke(c);
 	}
 
@@ -600,7 +605,7 @@ static gboolean paperstrip_draw_event(GtkWidget *widget, cairo_t *c, struct outp
 	cairo_line_to(c, left_margin + .5, height - .5);
 	cairo_move_to(c, right_margin + .5, .5);
 	cairo_line_to(c, right_margin + .5, height - .5);
-	cairo_set_source(c, green);
+	cairo_set_source(c, highlight);
 	cairo_stroke(c);
 
 	double now = sweep*ceil(time/sweep);
@@ -612,7 +617,7 @@ static gboolean paperstrip_draw_event(GtkWidget *widget, cairo_t *c, struct outp
 		if(y > height) break;
 		cairo_move_to(c, .5, y);
 		cairo_line_to(c, width-.5, y);
-		cairo_set_source(c, (last_tenth-i)%6 ? green : red);
+		cairo_set_source(c, (last_tenth-i)%6 ? grid_minor : grid_major);
 		cairo_stroke(c);
 	}
 
@@ -812,17 +817,20 @@ struct output_panel *init_output_panel(struct computer *comp, struct snapshot *s
 	g_signal_connect (op->paperstrip_drawing_area, "draw", G_CALLBACK(paperstrip_draw_event), op);
 	gtk_widget_set_events(op->paperstrip_drawing_area, GDK_EXPOSURE_MASK);
 
-	GtkWidget *hbox3 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+	// Paperstrip controls, shown as a single group of linked buttons
+	GtkWidget *hbox3 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	tg_add_class(hbox3, GTK_STYLE_CLASS_LINKED);
 	gtk_box_pack_start(GTK_BOX(vbox2), hbox3, FALSE, TRUE, 0);
 
 	// < button
-	GtkWidget *left_button = gtk_button_new_with_label("<");
+	GtkWidget *left_button = tg_icon_button("pan-start-symbolic", "<", "Shift the trace left");
 	gtk_box_pack_start(GTK_BOX(hbox3), left_button, TRUE, TRUE, 0);
 	g_signal_connect (left_button, "clicked", G_CALLBACK(handle_left), op);
 
 	// CLEAR button
 	if(comp) {
 		op->clear_button = gtk_button_new_with_label("Clear");
+		gtk_widget_set_tooltip_text(op->clear_button, "Discard the recorded beats");
 		gtk_box_pack_start(GTK_BOX(hbox3), op->clear_button, TRUE, TRUE, 0);
 		g_signal_connect (op->clear_button, "clicked", G_CALLBACK(handle_clear_trace), op);
 		gtk_widget_set_sensitive(op->clear_button, !snst->calibrate);
@@ -830,11 +838,12 @@ struct output_panel *init_output_panel(struct computer *comp, struct snapshot *s
 
 	// CENTER button
 	GtkWidget *center_button = gtk_button_new_with_label("Center");
+	gtk_widget_set_tooltip_text(center_button, "Centre the trace on the strip");
 	gtk_box_pack_start(GTK_BOX(hbox3), center_button, TRUE, TRUE, 0);
 	g_signal_connect (center_button, "clicked", G_CALLBACK(handle_center_trace), op);
 
 	// > button
-	GtkWidget *right_button = gtk_button_new_with_label(">");
+	GtkWidget *right_button = tg_icon_button("pan-end-symbolic", ">", "Shift the trace right");
 	gtk_box_pack_start(GTK_BOX(hbox3), right_button, TRUE, TRUE, 0);
 	g_signal_connect (right_button, "clicked", G_CALLBACK(handle_right), op);
 

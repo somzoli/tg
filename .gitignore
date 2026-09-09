@@ -49,3 +49,4 @@ Makefile.in
 # build directories
 /deb
 /msi
+/dist
