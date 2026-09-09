@@ -171,9 +171,10 @@ static void *computing_thread(void *void_computer)
 			c->actv->la = c->la;
 			void (*callback)(void *) = c->callback;
 			void *callback_data = c->callback_data;
+			int quit = c->recompute < 0;
 		pthread_mutex_unlock(&c->mutex);
 
-		if(c->recompute < 0) {
+		if(quit) {
 			if(callback) callback(callback_data);
 			break;
 		}
@@ -217,6 +218,17 @@ static void *computing_thread(void *void_computer)
 
 void computer_destroy(struct computer *c)
 {
+	/* Make sure the computing thread is gone before releasing anything it
+	   uses: it works on actv and on pdata->buffers, and it takes the mutex.
+	   Asking it to stop is idempotent, so this is safe whether or not it
+	   has already been told to quit. */
+	pthread_mutex_lock(&c->mutex);
+		c->recompute = -1;
+		c->callback = NULL;
+		pthread_cond_signal(&c->cond);
+	pthread_mutex_unlock(&c->mutex);
+	pthread_join(c->thread, NULL);
+
 	int i;
 	for(i=0; i<NSTEPS; i++)
 		pb_destroy(&c->pdata->buffers[i]);
@@ -229,7 +241,6 @@ void computer_destroy(struct computer *c)
 		snapshot_destroy(c->curr);
 	pthread_mutex_destroy(&c->mutex);
 	pthread_cond_destroy(&c->cond);
-	pthread_join(c->thread, NULL);
 	free(c);
 }
 

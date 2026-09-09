@@ -21,6 +21,14 @@
 
 #define LABEL_SIZE 64
 
+/* Upper bounds on what we accept from a file. They are far above anything the
+   program ever writes, and keep a corrupt file from asking for a huge (or
+   failing) allocation. */
+#define MAX_STRING_LEN 4096
+#define MAX_WAVEFORM_LEN (4 * PA_SAMPLE_RATE)
+#define MAX_EVENTS_LEN EVENTS_COUNT
+#define MAX_SNAPSHOTS 4096
+
 #define XSTR(X) STR(X)
 #define STR(X) #X
 #define LABEL_SIZE_STR XSTR(LABEL_SIZE)
@@ -192,8 +200,10 @@ static int scan_string(FILE *f, char **s, uint64_t max_l, uint64_t *len)
 	uint64_t l;
 	int n = 0;
 	if(1 != fscanf(f, " S%"SCNu64";%n", &l, &n) || !n) return 1;
-	if(max_l && l >= max_l) return 1;
+	if(!max_l || max_l > MAX_STRING_LEN) max_l = MAX_STRING_LEN;
+	if(l >= max_l) return 1;
 	if(!*s) *s = malloc(l+1);
+	if(!*s) return 1;
 	if(l+1 != fread(*s, 1, l+1, f)) return 1;
 	if((*s)[l] != ';') return 1;
 	(*s)[l] = 0;
@@ -215,8 +225,9 @@ static int scan_uint64_t_array(FILE *f, uint64_t **a, uint64_t max_l, uint64_t *
 	uint64_t l,i;
 	int n = 0;
 	if(1 != fscanf(f, " A%"SCNu64";%n", &l, &n) || !n) return 1;
-	if(max_l && l > max_l) return 1;
+	if(!max_l || l > max_l) return 1;
 	if(!*a) *a = malloc(l*sizeof(uint64_t));
+	if(!*a) return 1;
 	for(i = 0; i < l; i++)
 		if(scan_uint64_t(f, *a+i)) return 1;
 	if(len) *len = l;
@@ -237,8 +248,9 @@ static int scan_float_array(FILE *f, float **a, uint64_t max_l, uint64_t *len)
 	uint64_t l,i;
 	int n = 0;
 	if(1 != fscanf(f, " A%"SCNu64";%n", &l, &n) || !n) return 1;
-	if(max_l && l > max_l) return 1;
+	if(!max_l || l > max_l) return 1;
 	if(!*a) *a = malloc(l*sizeof(float));
+	if(!*a) return 1;
 	for(i = 0; i < l; i++)
 		if(scan_float(f, *a+i)) return 1;
 	if(len) *len = l;
@@ -391,7 +403,7 @@ static int scan_snapshot(FILE *f, struct snapshot **s, char **name)
 			debug("serializer: scanning pb->waveform\n");
 			uint64_t x;
 			if(	(*s)->pb->waveform ||
-				scan_float_array(f, &((*s)->pb->waveform), INT_MAX, &x)) goto error;
+				scan_float_array(f, &((*s)->pb->waveform), MAX_WAVEFORM_LEN, &x)) goto error;
 			(*s)->pb->sample_count = x;
 			continue;
 		}
@@ -399,7 +411,7 @@ static int scan_snapshot(FILE *f, struct snapshot **s, char **name)
 			debug("serializer: scanning events\n");
 			uint64_t x;
 			if(	(*s)->events ||
-				scan_uint64_t_array(f, &((*s)->events), INT_MAX, &x)) goto error;
+				scan_uint64_t_array(f, &((*s)->events), MAX_EVENTS_LEN, &x)) goto error;
 			(*s)->events_count = x;
 			continue;
 		}
@@ -428,31 +440,43 @@ static int scan_snapshot(FILE *f, struct snapshot **s, char **name)
 
 		if(eat_object(f)) goto error;
 	}
+	/* Everything below is attacker-controlled: a value that slips through
+	   here ends up as an array index or a divisor in the drawing code. */
 	debug("serializer: checking period\n");
-	if((*s)->pb->period <= 0 || (*s)->pb->sample_count < ceil((*s)->pb->period)) goto error;
+	if(!isfinite((*s)->pb->period) || (*s)->pb->period <= 0 ||
+	   (*s)->pb->sample_count < ceil((*s)->pb->period)) goto error;
+	debug("serializer: checking waveform\n");
+	if(!(*s)->pb->waveform || !isfinite((*s)->pb->waveform_max)) goto error;
+	debug("serializer: checking tic and toc\n");
+	if((*s)->pb->tic < 0 || (*s)->pb->tic >= (*s)->pb->sample_count) goto error;
+	if((*s)->pb->toc < 0 || (*s)->pb->toc >= (*s)->pb->sample_count) goto error;
+	if(!isfinite((*s)->pb->tic_pulse) || !isfinite((*s)->pb->toc_pulse)) goto error;
 	debug("serializer: checking timestamp\n");
 	if(!(*s)->timestamp) goto error;
 	debug("serializer: checking nominal_sr\n");
-	if(!(*s)->nominal_sr) goto error;
+	if((*s)->nominal_sr <= 0) goto error;
 	debug("serializer: checking bph\n");
 	if((*s)->bph && ( (*s)->bph < MIN_BPH || (*s)->bph > MAX_BPH )) goto error;
 	debug("serializer: checking la\n");
-	if((*s)->la  < MIN_LA  || (*s)->la  > MAX_LA ) goto error;
+	if(!isfinite((*s)->la) || (*s)->la  < MIN_LA  || (*s)->la  > MAX_LA ) goto error;
 	debug("serializer: checking cal\n");
 	if((*s)->cal < MIN_CAL || (*s)->cal > MAX_CAL) goto error;
 	debug("serializer: checking events\n");
+	if((*s)->events_wp < 0) goto error;
 	if((*s)->events_count && (*s)->events_wp >= (*s)->events_count) goto error;
 	if((*s)->signal > NSTEPS) (*s)->signal = NSTEPS;
 	debug("serializer: checking sample_rate\n");
-	if((*s)->sample_rate <= 0) goto error;
+	if(!isfinite((*s)->sample_rate) || (*s)->sample_rate <= 0) goto error;
 	debug("serializer: checking guessed_bph\n");
 	if((*s)->guessed_bph < MIN_BPH || (*s)->guessed_bph > MAX_BPH) goto error;
 	debug("serializer: checking rate\n");
-	if((*s)->rate < -9999 || (*s)->rate > 9999) goto error;
+	if(!isfinite((*s)->rate) || (*s)->rate < -9999 || (*s)->rate > 9999) goto error;
 	debug("serializer: checking beat error\n");
-	if((*s)->be < 0 || (*s)->be > 99.9) goto error;
+	if(!isfinite((*s)->be) || (*s)->be < 0 || (*s)->be > 99.9) goto error;
 	debug("serializer: checking amplitude\n");
-	if((*s)->amp < 0 || (*s)->amp > 360) goto error;
+	if(!isfinite((*s)->amp) || (*s)->amp < 0 || (*s)->amp > 360) goto error;
+	debug("serializer: checking trace centering\n");
+	if(!isfinite((*s)->trace_centering)) goto error;
 	(*s)->pb->events = NULL;
 #ifdef DEBUG
 	(*s)->pb->debug = NULL;
@@ -479,8 +503,10 @@ static int scan_snapshot_list(FILE *f, struct snapshot ***s, char ***names, uint
 	*names = NULL;
 	*cnt = 0;
 	if(1 != fscanf(f, " A%"SCNu64";%n", &i, &n) || !n) goto error;
+	if(i > MAX_SNAPSHOTS) goto error;
 	*s = malloc(i*sizeof(struct snapshot *));
 	*names = malloc(i*sizeof(char *));
+	if(!*s || !*names) goto error;
 	uint64_t j;
 	for(j = 0; j < i; j++) {
 		if(scan_snapshot(f, *s+*cnt, *names+*cnt)) goto error;
@@ -527,7 +553,7 @@ int read_file(FILE *f, struct snapshot ***s, char ***names, uint64_t *cnt)
 	if(scan_string(f, &l, LABEL_SIZE, NULL)) return 1;
 	debug("serializer: read version %s\n",l);
 	if(scan_label(f, l) || strcmp("data",l)) return 1;
-	debug("serializer: found data structure\n",l);
+	debug("serializer: found data structure\n");
 	int n = 0;
 	if(0 != fscanf(f, " T;%n", &n) || !n) return 1;
 	*s = NULL;
@@ -541,16 +567,22 @@ int read_file(FILE *f, struct snapshot ***s, char ***names, uint64_t *cnt)
 		}
 		if(eat_object(f)) goto error;
 	}
-	debug("serializer: end of data structure\n",l);
-	char c;
-	if(*s && 1 != fscanf(f, " %c", &c)) return 0;
-#ifdef DEBUG
-	if(*s) {
-		debug("serializer: stray char %c (%d) after end\n", c, c);
-	} else {
+	debug("serializer: end of data structure\n");
+	if(!*s) {
 		debug("serializer: no snapshots\n");
+		goto error;
+	}
+#ifdef DEBUG
+	{
+		/* Anything after the data structure is ignored: the snapshots we
+		   have were already read and validated one by one. */
+		char c;
+		if(1 == fscanf(f, " %c", &c))
+			debug("serializer: stray char %c (%d) after end\n", c, c);
 	}
 #endif
+	return 0;
+
 error:
 	debug("serializer: read error\n");
 	if(*s) {

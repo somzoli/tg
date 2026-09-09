@@ -58,7 +58,7 @@ static void draw_graph(double a, double b, cairo_t *c, struct processing_buffers
 		int j = floor(x);
 		double y;
 
-		if(p->waveform[j] <= 0) y = 0;
+		if(p->waveform[j] <= 0 || p->waveform_max <= 0) y = 0;
 		else y = p->waveform[j] * 0.4 / p->waveform_max;
 
 		int k = round(y*height);
@@ -768,6 +768,20 @@ static void handle_right(GtkButton *b, struct output_panel *op)
 {
 	UNUSED(b);
 	shift_trace(op,1);
+}
+
+/* Invalidate the drawing areas only: queueing a redraw on the whole notebook
+   also repaints the tab strip and the borders, ten times a second. */
+void redraw_op(struct output_panel *op)
+{
+	gtk_widget_queue_draw(op->output_drawing_area);
+	gtk_widget_queue_draw(op->paperstrip_drawing_area);
+	gtk_widget_queue_draw(op->tic_drawing_area);
+	gtk_widget_queue_draw(op->toc_drawing_area);
+	gtk_widget_queue_draw(op->period_drawing_area);
+#ifdef DEBUG
+	gtk_widget_queue_draw(op->debug_drawing_area);
+#endif
 }
 
 void op_set_snapshot(struct output_panel *op, struct snapshot *snst)

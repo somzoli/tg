@@ -88,7 +88,7 @@ static void handle_bph_change(GtkComboBox *b, struct main_window *w)
 		g_free(s);
 		w->bph = bph;
 		refresh_results(w);
-		gtk_widget_queue_draw(w->notebook);
+		redraw_op(w->active_panel);
 	}
 }
 
@@ -99,7 +99,7 @@ static void handle_la_change(GtkSpinButton *b, struct main_window *w)
 	if(la < MIN_LA || la > MAX_LA) la = DEFAULT_LA;
 	w->la = la;
 	refresh_results(w);
-	gtk_widget_queue_draw(w->notebook);
+	redraw_op(w->active_panel);
 }
 
 static void handle_cal_change(GtkSpinButton *b, struct main_window *w)
@@ -108,7 +108,7 @@ static void handle_cal_change(GtkSpinButton *b, struct main_window *w)
 	int cal = gtk_spin_button_get_value(b);
 	w->cal = cal;
 	refresh_results(w);
-	gtk_widget_queue_draw(w->notebook);
+	redraw_op(w->active_panel);
 }
 
 static gboolean output_cal(GtkSpinButton *spin, gpointer data)
@@ -516,14 +516,13 @@ static FILE *choose_file_for_save(struct main_window *w, char *title, char *sugg
 		char *filename = g_file_get_path(gf);
 		g_object_unref(gf);
 		if(!strcmp(".tgj", gtk_file_filter_get_name(gtk_file_chooser_get_filter(chooser)))) {
-			char *s = strdup(filename);
-			if(strlen(s) > 3 && strcasecmp(".tgj", s + strlen(s) - 4)) {
-				char *t = g_malloc(strlen(filename)+5);
+			size_t len = strlen(filename);
+			if(len < 4 || strcasecmp(".tgj", filename + len - 4)) {
+				char *t = g_malloc(len+5);
 				sprintf(t,"%s.tgj",filename);
 				g_free(filename);
 				filename = t;
 			}
-			free(s);
 		}
 		struct stat stst;
 		int do_open = 0;
@@ -943,7 +942,7 @@ guint refresh(struct main_window *w)
 	if(!g_object_get_data(G_OBJECT(panel), "op-pointer")) {
 		photogenic = !w->active_snapshot->calibrate && w->active_snapshot->pb;
 		gtk_widget_set_sensitive(w->save_item, photogenic);
-		gtk_widget_queue_draw(w->notebook);
+		redraw_op(w->active_panel);
 	}
 	gtk_widget_set_sensitive(w->snapshot_button, photogenic);
 	return FALSE;

@@ -88,6 +88,8 @@ static int paudio_callback(const void *input_buffer,
 	return 0;
 }
 
+static PaStream *audio_stream = NULL;
+
 int start_portaudio(int *nominal_sample_rate, double *real_sample_rate)
 {
 	PaStream *stream;
@@ -112,11 +114,13 @@ int start_portaudio(int *nominal_sample_rate, double *real_sample_rate)
 	PaDeviceIndex default_input = Pa_GetDefaultInputDevice();
 	if(default_input == paNoDevice) {
 		error("No default audio input device found");
+		Pa_Terminate();
 		return 1;
 	}
 	long channels = Pa_GetDeviceInfo(default_input)->maxInputChannels;
 	if(channels == 0) {
 		error("Default audio device has no input channels");
+		Pa_Terminate();
 		return 1;
 	}
 	if(channels > 2) channels = 2;
@@ -130,9 +134,11 @@ int start_portaudio(int *nominal_sample_rate, double *real_sample_rate)
 	if(err!=paNoError)
 		goto error;
 
-	const PaStreamInfo *info = Pa_GetStreamInfo(stream);
+	audio_stream = stream;
+
+	const PaStreamInfo *stream_info = Pa_GetStreamInfo(stream);
 	*nominal_sample_rate = PA_SAMPLE_RATE;
-	*real_sample_rate = info->sampleRate;
+	*real_sample_rate = stream_info->sampleRate;
 #ifdef DEBUG
 end:
 #endif
@@ -142,12 +148,19 @@ end:
 
 error:
 	error("Error opening audio input: %s", Pa_GetErrorText(err));
+	Pa_Terminate();
 	return 1;
 }
 
 int terminate_portaudio()
 {
 	debug("Closing portaudio\n");
+	if(audio_stream) {
+		/* Make sure the callback is not running any more */
+		Pa_StopStream(audio_stream);
+		Pa_CloseStream(audio_stream);
+		audio_stream = NULL;
+	}
 	PaError err = Pa_Terminate();
 	if(err != paNoError) {
 		error("Error closing audio: %s", Pa_GetErrorText(err));
