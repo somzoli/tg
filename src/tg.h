@@ -44,6 +44,7 @@
 #define NSTEPS 4
 #define PA_SAMPLE_RATE 44100u
 #define PA_BUFF_SIZE (PA_SAMPLE_RATE << (NSTEPS + FIRST_STEP))
+#define PA_FRAMES_PER_BUFFER 4096
 
 #define OUTPUT_FONT 40
 #define OUTPUT_WINDOW_HEIGHT 70
@@ -127,6 +128,7 @@ struct processing_data {
 
 int start_portaudio(int *nominal_sample_rate, double *real_sample_rate);
 int terminate_portaudio();
+int check_audio_stream(void);
 uint64_t get_timestamp(int light);
 int analyze_pa_data(struct processing_data *pd, int bph, double la, uint64_t events_from);
 int analyze_pa_data_cal(struct processing_data *pd, struct calibration_data *cd);
@@ -248,6 +250,7 @@ struct main_window {
 	int computer_timeout;
 
 	int is_light;
+	int audio_dead;
 	int zombie;
 	int controls_active;
 	int calibrate;

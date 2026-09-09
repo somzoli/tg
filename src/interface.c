@@ -243,6 +243,15 @@ static void recompute(struct main_window *w)
 
 static guint kick_computer(struct main_window *w)
 {
+	/* The audio backend can stop capturing on its own; tell the user rather
+	   than showing a display that has quietly stopped following the watch. */
+	if(check_audio_stream() && !w->audio_dead) {
+		w->audio_dead = 1;
+		error("The audio input has stopped and could not be restarted.\n"
+		      "Check that the recording device is still connected, "
+		      "then restart %s.", PROGRAM_NAME);
+	}
+
 	w->computer_timeout++;
 	if(w->calibrate && w->computer_timeout < 10) {
 		return TRUE;
@@ -977,6 +986,7 @@ static void start_interface(GApplication* app, void *p)
 	w->la = DEFAULT_LA;
 	w->calibrate = 0;
 	w->is_light = 0;
+	w->audio_dead = 0;
 
 	load_config(w);
 

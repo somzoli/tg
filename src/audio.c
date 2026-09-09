@@ -126,7 +126,13 @@ int start_portaudio(int *nominal_sample_rate, double *real_sample_rate)
 	if(channels > 2) channels = 2;
 	info.channels = channels;
 	info.light = false;
-	err = Pa_OpenDefaultStream(&stream,channels,0,paFloat32,PA_SAMPLE_RATE,paFramesPerBufferUnspecified,paudio_callback,&info);
+	/* An explicit buffer size, rather than paFramesPerBufferUnspecified: the
+	   macOS backend sizes its own input buffer from this value, and fails in
+	   the callback (paramErr) if the device later asks it to render a larger
+	   block, which happens when the device is reconfigured under us or runs
+	   at a different sample rate. We read the data at 10 Hz, so a large
+	   buffer costs us nothing. */
+	err = Pa_OpenDefaultStream(&stream,channels,0,paFloat32,PA_SAMPLE_RATE,PA_FRAMES_PER_BUFFER,paudio_callback,&info);
 	if(err!=paNoError)
 		goto error;
 
@@ -150,6 +156,32 @@ error:
 	error("Error opening audio input: %s", Pa_GetErrorText(err));
 	Pa_Terminate();
 	return 1;
+}
+
+/** Check that audio is still being captured, and restart it if not.
+ *
+ * When the audio device is reconfigured while we are recording, the macOS
+ * backend gives up from inside its own callback and stops the stream. Nothing
+ * reports that to us: the callback simply stops being called, and the program
+ * keeps running without ever seeing another sample. Poll for it instead.
+ *
+ * @return 1 if the stream is dead and could not be restarted, 0 otherwise
+ */
+int check_audio_stream(void)
+{
+	if(!audio_stream) return 0;
+	if(Pa_IsStreamActive(audio_stream) == 1) return 0;
+
+	debug("Audio stream is no longer running, restarting it\n");
+
+	/* The stream has to go back to the stopped state before it can start */
+	Pa_StopStream(audio_stream);
+	PaError err = Pa_StartStream(audio_stream);
+	if(err != paNoError) {
+		debug("Failed to restart audio: %s\n", Pa_GetErrorText(err));
+		return 1;
+	}
+	return 0;
 }
 
 int terminate_portaudio()
